@@ -1,0 +1,83 @@
+pipeline {
+    agent {
+        kubernetes {
+            label 'helm-deployer'
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: slave
+    app: helm-deployer
+spec:
+  serviceAccountName: jenkins-admin
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "500m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+  - name: helm
+    image: alpine/helm:3
+    command: ['sleep']
+    args: ['99999']
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "200m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+      type: Socket
+            """
+        }
+    }
+
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['default','dev', 'prod'], description: 'Select the environment')
+        string(name: 'VERSION', defaultValue: 'latest', description: 'Version of the application to deploy')
+    }
+    stages {
+        stage('Deploy') {
+            steps {
+                echo "Deploying to ${params.ENVIRONMENT}"
+                echo "Using version: ${params.VERSION}"
+            }
+        }
+
+        stage('Helm Install') {
+            steps {
+                container('helm') {
+                    script {
+                        sh """
+                            helm version
+                            helm repo add helm-charts https://akshaypgore.github.io/helm-charts/
+                            helm repo update
+                            if [ "${params.VERSION}" = 'dev' ]; then
+                                echo "Using development version"
+                                helm upgrade --install httpd helm-charts/app --version 1.1.0 --values values.yaml --values dev.yaml --namespace ${params.ENVIRONMENT}
+                            else
+                                helm upgrade --install httpd helm-charts/app --version 1.1.0 --values values.yaml --namespace ${params.ENVIRONMENT}
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+
+    }
+}
